@@ -1,0 +1,95 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() { return request.auth != null; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    
+    // Admin check - bootstrapped admin email
+    function isAdmin() { 
+      return isSignedIn() && 
+             request.auth.token.email == 'edvaldoquinglish@gmail.com' && 
+             request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    
+    // A user is verified only if their profile has isVerified = true
+    function isVerifiedUser() {
+      return isSignedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isVerified == true;
+    }
+
+    // --- User Profiles ---
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId);
+      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || resource.data.role == 'freelancer');
+      
+      allow create: if isOwner(userId) && isValidId(userId) && isValidUser(incoming());
+      allow update: if (isOwner(userId) && isValidId(userId) && isValidUserUpdate()) || isAdmin();
+
+      function isValidUser(data) {
+        return data.keys().hasAll(['uid', 'fullName', 'role', 'onboarded', 'isVerified']) &&
+               data.uid == request.auth.uid &&
+               data.fullName is string && data.fullName.size() <= 100 &&
+               data.role in ['freelancer', 'client'] &&
+               data.onboarded == true &&
+               data.isVerified == false; // Initial state must be unverified
+      }
+
+      function isValidUserUpdate() {
+        let affected = incoming().diff(existing()).affectedKeys();
+        return incoming().uid == existing().uid &&
+               incoming().isVerified == existing().isVerified && // Users cannot verify themselves
+               affected.hasOnly([
+                 'fullName', 'age', 'unitelMoney', 'afriMoney', 'aki', 
+                 'multicaixaExpress', 'nif', 'province', 'municipality', 
+                 'neighborhood', 'bio', 'profilePic', 'rating', 'onboarded', 'career'
+               ]);
+      }
+    }
+
+    // --- Gigs / Services ---
+    match /gigs/{gigId} {
+      allow read: if isSignedIn() && isValidId(gigId);
+      allow create: if isVerifiedUser() && isValidId(gigId) && isValidGig(incoming());
+      allow update: if isVerifiedUser() && isValidId(gigId) && isOwner(existing().freelancerId) && isValidGig(incoming());
+      allow delete: if isVerifiedUser() && isValidId(gigId) && isOwner(existing().freelancerId);
+
+      function isValidGig(data) {
+        return data.freelancerId == request.auth.uid &&
+               data.title is string && data.title.size() <= 150 &&
+               data.price is number && data.price >= 0;
+      }
+    }
+
+    // --- Orders ---
+    match /orders/{orderId} {
+      allow get: if isSignedIn() && isValidId(orderId) && (isOwner(existing().clientId) || isOwner(existing().freelancerId));
+      allow list: if isSignedIn() && (resource.data.clientId == request.auth.uid || resource.data.freelancerId == request.auth.uid);
+      
+      allow create: if isVerifiedUser() && isValidId(orderId) && isValidOrder(incoming());
+      allow update: if isVerifiedUser() && isValidId(orderId) && (isOwner(existing().clientId) || isOwner(existing().freelancerId)) && isValidOrderUpdate();
+
+      function isValidOrder(data) {
+        return data.clientId == request.auth.uid &&
+               data.status in ['pending'] &&
+               data.amount is number && data.amount > 0;
+      }
+
+      function isValidOrderUpdate() {
+        return incoming().clientId == existing().clientId &&
+               incoming().freelancerId == existing().freelancerId &&
+               incoming().amount == existing().amount &&
+               incoming().status in ['pending', 'in_progress', 'completed', 'cancelled'];
+      }
+    }
+  }
+}
