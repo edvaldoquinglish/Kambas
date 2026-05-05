@@ -1,1 +1,109 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Represents a user (freelancer or client) in the Kambas platform.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "fullName": { "type": "string" },
+        "email": { "type": "string" },
+        "age": { "type": "integer" },
+        "unitelMoney": { "type": "string", "description": "Unitel Money account number" },
+        "afriMoney": { "type": "string", "description": "Afri Money account number" },
+        "nif": { "type": "string", "description": "Personal NIF or BI" },
+        "province": { "type": "string" },
+        "municipality": { "type": "string" },
+        "neighborhood": { "type": "string" },
+        "career": { "type": "string", "description": "Area of acting/expertise" },
+        "role": { "type": "string", "enum": ["freelancer", "client"] },
+        "bio": { "type": "string" },
+        "profilePic": { "type": "string" },
+        "rating": { "type": "number" },
+        "onboarded": { "type": "boolean" },
+        "isVerified": { "type": "boolean", "description": "Whether the admin has verified the payment" }
+      },
+      "required": ["uid", "fullName", "role"]
+    },
+    "Gig": {
+      "title": "Gig",
+      "description": "A service offered by a freelancer.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "freelancerId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "price": { "type": "number" },
+        "category": { "type": "string" },
+        "images": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["freelancerId", "title", "price", "category"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "A service purchase transaction.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "clientId": { "type": "string" },
+        "freelancerId": { "type": "string" },
+        "gigId": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "in_progress", "completed", "cancelled"] },
+        "paymentMethod": { "type": "string" },
+        "amount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Chat": {
+      "title": "Chat",
+      "description": "A conversation between two users.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "participants": { "type": "array", "items": { "type": "string" } },
+        "lastMessage": { "type": "string" },
+        "lastMessageAt": { "type": "string", "format": "date-time" },
+        "lastMessageBy": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Message": {
+      "title": "Message",
+      "description": "A single chat message.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "text": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/gigs/{gigId}": {
+      "schema": "Gig",
+      "description": "Services offered"
+    },
+    "/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Service orders"
+    },
+    "/chats/{chatId}": {
+      "schema": "Chat",
+      "description": "Conversations"
+    },
+    "/chats/{chatId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Chat messages"
+    }
+  }
+}
+
 
