@@ -1,1 +1,123 @@
 
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net - Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Global Helpers ---
+    function isSignedIn() { return request.auth != null; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    
+    // Bootstrapped Admin
+    function isAdmin() { 
+      return isSignedIn() && 
+             request.auth.token.email == 'edvaldoquinglish@gmail.com' && 
+             request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    
+    // Identity verification check
+    function isVerifiedUser() {
+      return isSignedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isVerified == true;
+    }
+
+    // --- User Profiles ---
+    match /users/{userId} {
+      // 8. Secure List Queries: Explicitly evaluate resource.data
+      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || resource.data.role == 'freelancer');
+      allow get: if isSignedIn() && isValidId(userId);
+      
+      allow create: if isOwner(userId) && isValidId(userId) && isValidUser(incoming());
+      // 4. Tiered Identity Logic: Users manage own profile except verification/immutable fields
+      allow update: if (isOwner(userId) && isValidId(userId) && isValidUserUpdate()) || isAdmin();
+
+      function isValidUser(data) {
+        return data.keys().hasAll(['uid', 'fullName', 'role', 'onboarded', 'isVerified']) &&
+               data.uid == request.auth.uid &&
+               data.fullName is string && data.fullName.size() <= 100 &&
+               data.role in ['freelancer', 'client'] &&
+               data.onboarded == true &&
+               data.isVerified == false; // Mandatory validation: cannot self-verify
+      }
+
+      function isValidUserUpdate() {
+        let affected = incoming().diff(existing()).affectedKeys();
+        // 9. Immortal Field: uid must remain unchanged
+        return incoming().uid == existing().uid &&
+               incoming().isVerified == existing().isVerified && // Mandatory: users cannot update verification
+               affected.hasOnly([
+                 'fullName', 'age', 'unitelMoney', 'afriMoney', 'aki', 
+                 'multicaixaExpress', 'nif', 'province', 'municipality', 
+                 'neighborhood', 'bio', 'profilePic', 'rating', 'onboarded', 'career'
+               ]);
+      }
+    }
+
+    // --- Gigs / services ---
+    match /gigs/{gigId} {
+      allow read: if isSignedIn() && isValidId(gigId);
+      
+      // 1. Master Gate: Check verification status for all writes
+      allow create: if isSignedIn() && isValidId(gigId) && isValidGig(incoming()) && isVerifiedUser();
+      allow update: if isSignedIn() && isValidId(gigId) && isOwner(existing().freelancerId) && isValidGig(incoming()) && isVerifiedUser();
+      allow delete: if isSignedIn() && isValidId(gigId) && isOwner(existing().freelancerId) && isVerifiedUser();
+
+      function isValidGig(data) {
+        return data.freelancerId == request.auth.uid &&
+               data.title is string && data.title.size() <= 150 &&
+               data.price is number && data.price >= 0 &&
+               data.category is string && data.category.size() <= 50;
+      }
+    }
+
+    // --- Orders ---
+    match /orders/{orderId} {
+      // Access strictly limited to participants
+      allow get: if isSignedIn() && isValidId(orderId) && (isOwner(existing().clientId) || isOwner(existing().freelancerId));
+      allow list: if isSignedIn() && (resource.data.clientId == request.auth.uid || resource.data.freelancerId == request.auth.uid);
+      
+      allow create: if isSignedIn() && isValidId(orderId) && isValidOrder(incoming()) && isVerifiedUser();
+      allow update: if isSignedIn() && isValidId(orderId) && (isOwner(existing().clientId) || isOwner(existing().freelancerId)) && isValidOrderUpdate() && isVerifiedUser();
+
+      function isValidOrder(data) {
+        return data.clientId == request.auth.uid &&
+               data.status == 'pending' &&
+               data.amount is number && data.amount > 0;
+      }
+
+      function isValidOrderUpdate() {
+        // Actions allowed: Change status
+        return incoming().clientId == existing().clientId &&
+               incoming().freelancerId == existing().freelancerId &&
+               incoming().amount == existing().amount &&
+               incoming().status in ['pending', 'in_progress', 'completed', 'cancelled'];
+      }
+    }
+
+    // --- Chats ---
+    match /chats/{chatId} {
+      allow get: if isSignedIn() && request.auth.uid in existing().participants;
+      allow list: if isSignedIn() && request.auth.uid in resource.data.participants;
+      
+      allow create: if isSignedIn() && request.auth.uid in incoming().participants;
+      allow update: if isSignedIn() && request.auth.uid in existing().participants && isValidChatUpdate();
+
+      function isValidChatUpdate() {
+        let affected = incoming().diff(existing()).affectedKeys();
+        return affected.hasOnly(['lastMessage', 'lastMessageAt', 'lastMessageBy', 'updatedAt']);
+      }
+
+      match /messages/{messageId} {
+        allow read: if isSignedIn() && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
+        allow create: if isSignedIn() && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants && incoming().senderId == request.auth.uid;
+      }
+    }
+  }
+}
